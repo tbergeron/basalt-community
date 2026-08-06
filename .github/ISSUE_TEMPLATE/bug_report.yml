@@ -1,0 +1,30 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Desktop or mobile, and OS (e.g. macOS 15, iOS 18, Windows 11)
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: App version
+      description: Bottom of the Preferences page in Basalt has a versions line. Copy it here.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: false
