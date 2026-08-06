@@ -1,4 +1,8 @@
-# Basalt Community
+<div align="center">
+  <img src="assets/icon.png" width="120" alt="Basalt icon">
+
+  # Basalt Community
+</div>
 
 Docs and community hub for [Basalt](https://basaltapp.com), a privacy-first budgeting app that stores your data as plain YAML files on your own disk instead of in someone else's database.
 
