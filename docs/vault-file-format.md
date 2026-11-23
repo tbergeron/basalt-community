@@ -2,7 +2,7 @@
 
 Basalt stores your budget as a folder of plain YAML files — a **vault**. You own that folder; it works with git, Syncthing, Dropbox, or any file sync you like, and you can read or edit it by hand.
 
-This document is the reference for the vault format: the current layout, files created lazily at runtime, and legacy data found in older vaults. It's generated from Basalt's internal types and services (not included in this repo, which covers docs and community issues only), so file paths cited below (e.g. `packages/apple/BasaltKit/Sources/BasaltModels/Types`) are internal pointers for context, not links you can follow here.
+This document is the reference for the vault format: the layout, and the files created lazily at runtime. It's generated from Basalt's internal types and services (not included in this repo, which covers docs and community issues only), so file paths cited below (e.g. `packages/apple/BasaltKit/Sources/BasaltModels/Types`) are internal pointers for context, not links you can follow here.
 
 ## Overview
 
@@ -37,8 +37,7 @@ vault/
 ├── transactions/
 │   └── YYYY-MM.yml
 ├── payees.yml
-├── preferences.yml
-└── meta.yml
+└── preferences.yml
 ```
 
 The files and directories do not all exist in every vault:
@@ -52,8 +51,6 @@ The files and directories do not all exist in every vault:
 - `.basalt/bank-sync/` is created lazily when a bank sync has transactions waiting for review.
 - `imports/` is currently an empty scaffold. Import jobs and uploaded documents are not stored
   there.
-- `meta.yml` is legacy data. The current apps do not read or write it.
-- Older vaults may have no `.basalt/` directory and can still contain usable financial data.
 
 See `packages/apple/BasaltKit/Sources/BasaltBackend/Vault/VaultInitializer.swift`.
 
@@ -61,8 +58,8 @@ See `packages/apple/BasaltKit/Sources/BasaltBackend/Vault/VaultInitializer.swift
 
 ### Single-document files
 
-Accounts, budgets, categories, `payees.yml`, `preferences.yml`, and legacy `meta.yml` contain one
-YAML document wrapped in `---` markers:
+Accounts, budgets, categories, `payees.yml`, and `preferences.yml` contain one YAML document
+wrapped in `---` markers:
 
 ```yaml
 ---
@@ -135,7 +132,7 @@ date value.
 
 ### Entity IDs
 
-Current account, category, and transaction IDs use:
+Account, category, and transaction IDs use:
 
 ```text
 <prefix><epoch-milliseconds>_<seven-base36-characters>
@@ -201,7 +198,7 @@ Path:
 accounts/<sanitized-initial-name>.yml
 ```
 
-Current example:
+Example:
 
 ```yaml
 ---
@@ -310,10 +307,10 @@ Fields:
 - `updated_at` — required date-time string.
 
 New vaults seed the categories listed in
-`packages/apple/BasaltKit/Sources/BasaltBackend/Vault/VaultInitializer.swift`. Current
-seeding generates a new random `cat_` ID for every category.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Vault/VaultInitializer.swift`. Seeding
+generates a new random `cat_` ID for every category.
 
-The current seed set is:
+The seed set is:
 
 - Income: `Interests & Dividends`, `Investments`, `Other Income`, `Salary`
 - Expenses: `Business`, `Check`, `Childcare`, `Electricity`, `Entertainment`,
@@ -460,8 +457,7 @@ rule applied to it is:
 Consequences of that rule, all deliberate:
 
 - The rule is symmetric, so whichever leg carries the link is excluded.
-- Absent or `null` means "not a transfer", which is the behaviour of every vault written
-  before this field existed. Upgrading changes nothing on its own.
+- Absent or `null` means "not a transfer".
 - A link pointing at a deleted or unknown account degrades to counting the transaction rather
   than silently zeroing a real expense. `deleteAccount` also clears links pointing at it.
 - Loan payments keep counting as expenses. A loan records no per-transaction spending, so the
@@ -593,7 +589,7 @@ Fields:
 
 When the file is missing, the preferences service creates it from current runtime defaults. When
 reading an existing file, it shallow-merges missing top-level fields from those defaults. The
-new-vault initializer contains an older, smaller default template; the service fills newer
+new-vault initializer contains a smaller default template; the service fills the missing
 top-level fields in the returned object on read, but does not deep-merge nested objects or
 immediately rewrite the file.
 
@@ -702,8 +698,7 @@ Fields:
 - `schema_version` — required number. Current value is `1`.
 
 The container ID in the filename is encoded with `encodeURIComponent`, with each `%` replaced by
-`_`. The migration service also reads the legacy `.basalt/migrations/<provider>.json` path as a
-fallback.
+`_`.
 
 See
 `packages/apple/BasaltKit/Sources/BasaltBackend/Services/MigrationService.swift`.
@@ -803,8 +798,7 @@ Row fields:
 - `status` — `pending` or `cleared`.
 
 Imported rows move to `transaction_map` and skipped rows to `transaction_skip_map`; both leave
-the pending file. The file is deleted when no row is left. A file with an older `schema_version`
-is rebuilt from a full refetch at the next sync. Removing a bank deletes its source map and
+the pending file. The file is deleted when no row is left. Removing a bank deletes its source map and
 pending file; its imported transactions stay.
 
 Plaid access tokens are never written to the vault. They are kept in the synced iCloud Keychain,
@@ -812,33 +806,6 @@ so the user's other devices can sync the same bank.
 
 See
 `packages/apple/BasaltKit/Sources/BasaltBackend/Services/BankSyncService.swift`.
-
-## Legacy `meta.yml`
-
-Path:
-
-```text
-meta.yml
-```
-
-Example:
-
-```yaml
----
-app_version: 1.0.0
-created_at: 2024-01-01 00:00
-last_opened: 2026-01-29 12:00
----
-```
-
-Fields:
-
-- `app_version` — string. Application version associated with the vault.
-- `created_at` — date-time string. Legacy vault creation timestamp.
-- `last_opened` — date-time string. Legacy last-opened timestamp.
-
-Older vaults can contain this file. The current apps do not read, write, or create `meta.yml`.
-Current vault identity metadata belongs in `.basalt/vault.json`.
 
 ## Referential integrity
 
@@ -883,42 +850,6 @@ Guidelines:
 - `.<filename>.icloud` — iCloud Drive placeholder for a file that is not yet downloaded to the
   device. Basalt downloads the file before it reads it.
 - `.DS_Store` — may be created by macOS. Basalt does not own it, and file watching ignores it.
-- `accounts-backup-<timestamp>/` — older vaults may contain these folders from a former
-  maintenance script; they are not part of the vault format.
-
-## Legacy and compatibility notes
-
-### Legacy account `balance`
-
-Old account files used one `balance` field instead of `opening_balance` and `current_balance`.
-When an account has `balance` but no `opening_balance`, account loading migrates it in memory:
-
-- `opening_balance` and `current_balance` both receive the old value.
-- `opening_date` is set ten years before migration, as an ISO 8601 string, so historical
-  transactions are included.
-- A later account write serializes the migrated current fields.
-
-`balance` is not part of the current `Account` type. Some transitional vaults contain both
-`balance` and the current fields. Because current reads and updates spread parsed objects, that
-unknown key can be preserved on later writes; consumers must not rely on it. The authoritative
-fields are `opening_balance` and `current_balance`.
-
-### Fixed category IDs
-
-Older and demo vaults may use readable IDs such as `cat_food`, `cat_housing`, or `cat_salary`.
-These remain valid string IDs when references are consistent. Current new-vault seeding generates
-timestamp/random `cat_` IDs instead, so code must never assume a category's purpose from its ID.
-
-### Missing `.basalt`
-
-Older vaults may have valid YAML data but no `.basalt/vault.json`. This indicates that the vault
-predates current metadata initialization; it does not invalidate the YAML entities.
-
-### Initializer defaults versus runtime defaults
-
-The new-vault YAML template and the current `defaultPreferences` object are not identical. Runtime
-reads merge current top-level defaults into the stored file. Documentation and migrations should
-use the `Preferences` type and the `defaultPreferences` object as the current schema.
 
 ## Maintaining this document
 
