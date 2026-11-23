@@ -2,7 +2,7 @@
 
 Basalt stores your budget as a folder of plain YAML files — a **vault**. You own that folder; it works with git, Syncthing, Dropbox, or any file sync you like, and you can read or edit it by hand.
 
-This document is the reference for the vault format: the current layout, files created lazily at runtime, and legacy data found in older vaults. It's generated from Basalt's internal types and services (not included in this repo, which covers docs and community issues only), so file paths cited below (e.g. `packages/shared/src/types`) are internal pointers for context, not links you can follow here.
+This document is the reference for the vault format: the current layout, files created lazily at runtime, and legacy data found in older vaults. It's generated from Basalt's internal types and services (not included in this repo, which covers docs and community issues only), so file paths cited below (e.g. `packages/apple/BasaltKit/Sources/BasaltModels/Types`) are internal pointers for context, not links you can follow here.
 
 ## Overview
 
@@ -10,18 +10,12 @@ A Basalt vault is a plain directory containing YAML entity files and a small amo
 metadata. Files can be read and edited without Basalt, but manual edits must preserve IDs,
 references, data types, and YAML document separators.
 
-Node runtime resolves its default active vault in this order:
+The iOS and macOS apps open a folder the user picks in the system folder picker and save a
+security-scoped bookmark to reopen it at the next launch. Creating a vault makes a new folder
+inside the picked folder, named from the vault name (`My Vault` -> `my-vault`). Operations that
+require vault data fail with `vault_unavailable` until a vault is open.
 
-1. `BASALT_VAULT_PATH`
-2. `BASALT_DATA_DIR`
-3. `<repository>/data/my-budget`
-
-Electron sets the active Node storage root from its vault host bridge. Mobile injects its active
-root through the React Native storage port after opening a security-scoped bookmark; it does not
-read Node environment variables. Operations that require vault data fail with `vault_unavailable`
-until a platform has configured an active root.
-
-See `packages/backend/src/runtime`.
+See `packages/apple/AppCore/Stores/VaultStore.swift`.
 
 ## Directory layout
 
@@ -29,8 +23,10 @@ See `packages/backend/src/runtime`.
 vault/
 ├── .basalt/
 │   ├── vault.json
-│   └── migrations/
-│       └── <provider>-<container-id>.json
+│   ├── migrations/
+│   │   └── <provider>-<container-id>.json
+│   └── bank-sync/
+│       └── plaid-<item-id>-pending.json
 ├── accounts/
 │   └── <sanitized-account-name>.yml
 ├── budgets/
@@ -52,13 +48,14 @@ The files and directories do not all exist in every vault:
 - New-vault initialization seeds the default category files.
 - Account, budget, and transaction files are created when their first entities are created.
 - `payees.yml` is created lazily when the payee index is initialized or updated.
-- `.basalt/migrations/` is created lazily when a migration source map is written.
+- `.basalt/migrations/` is created lazily when a migration or bank sync source map is written.
+- `.basalt/bank-sync/` is created lazily when a bank sync has transactions waiting for review.
 - `imports/` is currently an empty scaffold. Import jobs and uploaded documents are not stored
   there.
-- `meta.yml` is legacy/demo data. The current runtime does not read or write it.
+- `meta.yml` is legacy data. The current apps do not read or write it.
 - Older vaults may have no `.basalt/` directory and can still contain usable financial data.
 
-See `packages/shared/src/utils/vaultInit.ts`.
+See `packages/apple/BasaltKit/Sources/BasaltBackend/Vault/VaultInitializer.swift`.
 
 ## YAML conventions
 
@@ -102,7 +99,7 @@ document position. Moving it to another month appends it to the destination file
 not sorted on disk; transaction queries sort in memory when needed.
 
 See
-`packages/backend/src/services/yamlService.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Codec/YAMLWriter.swift`.
 
 ### Scalar types
 
@@ -126,8 +123,9 @@ Some fields use other formats:
 
 - Month periods and monthly filenames: `YYYY-MM`
 - Date-only values may appear as `YYYY-MM-DD`
-- `preferences.updated_at`, migration timestamps, and vault metadata use ISO 8601 strings such as
-  `2026-07-10T18:58:09.306Z`
+- `preferences.updated_at`, `payees.yml` `updated_at`, and vault metadata use ISO 8601 strings
+  such as `2026-07-10T18:58:09.306Z`
+- Migration and bank sync source maps use the local `YYYY-MM-DD HH:mm` format, like entities
 
 The parser accepts valid YAML scalars, but application code generally expects these exact string
 formats. Quoting a timestamp is safe and prevents YAML libraries from interpreting it as a native
@@ -159,7 +157,7 @@ Vault IDs use a similar `vault_<epoch-milliseconds>_<random>` format. IDs are op
 code must not derive names, dates, or relationships from them.
 
 See
-`packages/shared/src/utils/validation.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Shared/SharedUtils.swift`.
 
 ### Name-based filenames
 
@@ -269,7 +267,7 @@ credits increase it. Negative balances represent debt, including for credit card
 
 Account balance values are anchors, not three interchangeable totals. For balance-calculation
 behavior, see
-`packages/backend/src/services/accountService.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Services/AccountService.swift`.
 
 ## Categories
 
@@ -312,7 +310,7 @@ Fields:
 - `updated_at` — required date-time string.
 
 New vaults seed the categories listed in
-`packages/shared/src/defaultCategories.ts`. Current
+`packages/apple/BasaltKit/Sources/BasaltBackend/Vault/VaultInitializer.swift`. Current
 seeding generates a new random `cat_` ID for every category.
 
 The current seed set is:
@@ -391,7 +389,7 @@ Creation appends a transaction to the month file, updates the account's
 `payees.yml` update. Changing `date` moves the document when its month changes.
 
 See
-`packages/backend/src/services/transactionService.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Services/TransactionService.swift`.
 
 ## Budgets
 
@@ -472,9 +470,9 @@ Consequences of that rule, all deliberate:
   expenses and ignoring purchases. That is the correct setting when a card's spending is not
   fully imported, since excluding its payments would otherwise make the budget under-report.
 
-See `packages/shared/src/utils/transfer.ts` for the
-rule and
-`packages/shared/src/services/transferDetection.ts`
+See `isBudgetNeutralTransfer` in
+`packages/apple/BasaltKit/Sources/BasaltBackend/Shared/BudgetRules.swift` for the rule and
+`packages/apple/BasaltKit/Sources/BasaltBackend/Shared/TransferDetection.swift`
 for how unlinked payments are detected from the payee, previously confirmed links, and
 amount/date pairing.
 
@@ -484,8 +482,8 @@ rewrite every affected budget file, so values on disk can become stale. Budget v
 reads calculate fresh values from transactions; raw budget reads can return the stored values.
 
 See
-`packages/backend/src/services/budgetService.ts`
-and `packages/shared/src/utils/category.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Services/BudgetService.swift`
+and `packages/apple/BasaltKit/Sources/BasaltBackend/Shared/BudgetRules.swift`.
 
 ## Payee index
 
@@ -520,7 +518,7 @@ failure can temporarily leave it out of sync. Removing a payee from the index do
 edit transactions.
 
 See
-`packages/backend/src/services/payeeIndexService.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Services/PayeeIndexService.swift`.
 
 ## Preferences
 
@@ -631,7 +629,7 @@ import_reminder:
 reminder fields.
 
 Current runtime defaults are defined in
-`packages/shared/src/types/preferences.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Services/PreferencesService.swift`.
 
 ## Vault metadata
 
@@ -660,7 +658,7 @@ Fields:
 - `version` — required string. Metadata format/application version written at creation; currently
   `1.0.0`.
 
-The standard backend YAML file watcher ignores dotfiles and JSON, so this metadata does not
+The app's vault watcher reacts only to `.yml` and `.yaml` files, so this metadata does not
 participate in YAML change detection.
 
 ## Migration source maps
@@ -684,33 +682,136 @@ Example:
     "provider-transaction-id": "tx_1770000000000_def5678"
   },
   "transaction_skip_map": {
-    "skipped-provider-transaction-id": "2026-07-10T18:58:09.306Z"
+    "skipped-provider-transaction-id": "2026-07-10 18:58"
   },
-  "imported_at": "2026-07-10T18:58:09.306Z",
+  "imported_at": "2026-07-10 18:58",
   "schema_version": 1
 }
 ```
 
 Fields:
 
-- `provider` — required enum. Currently `ynab` or `monarch`.
+- `provider` — required enum: `ynab` or `monarch` for migrations, `plaid` for bank sync (see
+  *Bank sync* below).
 - `container_id` — required string. Source provider's budget/container ID.
 - `account_map` — required object mapping provider account IDs to Basalt account IDs.
 - `transaction_map` — required object mapping provider transaction IDs to Basalt transaction IDs.
-- `transaction_skip_map` — optional object mapping provider transaction IDs to the ISO timestamp
-  at which the user chose to skip them.
-- `imported_at` — required ISO 8601 string. Last migration/import timestamp.
+- `transaction_skip_map` — optional object mapping provider transaction IDs to the local
+  `YYYY-MM-DD HH:mm` time at which the user chose to skip them.
+- `imported_at` — required local `YYYY-MM-DD HH:mm` string. Last migration/import time.
 - `schema_version` — required number. Current value is `1`.
 
 The container ID in the filename is encoded with `encodeURIComponent`, with each `%` replaced by
 `_`. The migration service also reads the legacy `.basalt/migrations/<provider>.json` path as a
-fallback. Account merges rewrite `account_map` values from the source account ID to the target
-account ID.
+fallback.
 
 See
-`packages/backend/src/services/migrationService.ts`
-and
-`packages/backend/src/services/accountMergeService.ts`.
+`packages/apple/BasaltKit/Sources/BasaltBackend/Services/MigrationService.swift`.
+
+## Bank sync
+
+Bank sync connects a bank through Plaid. Each linked bank (a Plaid *item*) has a source map and,
+while transactions wait for review, a pending file.
+
+### Bank source map
+
+Path:
+
+```text
+.basalt/migrations/plaid-<encoded-item-id>.json
+```
+
+Example:
+
+```json
+{
+  "provider": "plaid",
+  "container_id": "example-item-id",
+  "institution_name": "Example Bank",
+  "account_map": {
+    "plaid-account-id": "acc_1770000000000_abc1234"
+  },
+  "transaction_map": {
+    "plaid-transaction-id": "tx_1770000000000_def5678"
+  },
+  "transaction_skip_map": {
+    "skipped-plaid-transaction-id": true
+  },
+  "imported_at": "2026-11-14 10:12",
+  "schema_version": 1,
+  "sync_from": "2026-11-01",
+  "cursor": "opaque-plaid-cursor"
+}
+```
+
+It uses the migration source map format above, with these differences:
+
+- `container_id` — the Plaid item ID.
+- `institution_name` — string or `null`. Bank display name.
+- `account_map` — Plaid account IDs to Basalt account IDs. Empty until the user maps the
+  accounts; Plaid accounts that are not in the map do not sync.
+- `transaction_skip_map` — values are `true`, not timestamps.
+- `imported_at` — set when the bank is linked.
+- `sync_from` — optional `YYYY-MM-DD` string. Transactions dated before it are ignored.
+- `cursor` — optional string. Plaid's sync cursor; the next sync fetches changes after it.
+- `last_error_code` — optional string. Plaid error of the last failed sync, for example
+  `ITEM_LOGIN_REQUIRED`. A successful sync removes it.
+
+### Pending transactions
+
+Path:
+
+```text
+.basalt/bank-sync/plaid-<encoded-item-id>-pending.json
+```
+
+Transactions fetched from the bank wait here until the user reviews them. The file is in the
+vault, so every device that opens the vault sees them.
+
+Example:
+
+```json
+{
+  "schema_version": 3,
+  "rows": [
+    {
+      "plaid_id": "plaid-transaction-id",
+      "plaid_account_id": "plaid-account-id",
+      "account_id": "acc_1770000000000_abc1234",
+      "date": "2026-11-20 00:00",
+      "amount": 12.5,
+      "type": "debit",
+      "payee": "Example Store",
+      "description": "EXAMPLE STORE #123",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+Row fields:
+
+- `plaid_id` — Plaid transaction ID.
+- `plaid_account_id` — Plaid account ID.
+- `account_id` — Basalt account ID from `account_map`.
+- `date` — `YYYY-MM-DD 00:00`, from Plaid's authorized date, else its posted date.
+- `amount` — positive number rounded to two decimal places.
+- `type` — `debit` when money leaves the account (credit cards included), else `credit`.
+- `payee` — the merchant name, else the bank's text. Empty when the bank sends only a generic
+  label, so the review asks the user for a payee.
+- `description` — the bank's own text when it differs from `payee`, else `''`.
+- `status` — `pending` or `cleared`.
+
+Imported rows move to `transaction_map` and skipped rows to `transaction_skip_map`; both leave
+the pending file. The file is deleted when no row is left. A file with an older `schema_version`
+is rebuilt from a full refetch at the next sync. Removing a bank deletes its source map and
+pending file; its imported transactions stay.
+
+Plaid access tokens are never written to the vault. They are kept in the synced iCloud Keychain,
+so the user's other devices can sync the same bank.
+
+See
+`packages/apple/BasaltKit/Sources/BasaltBackend/Services/BankSyncService.swift`.
 
 ## Legacy `meta.yml`
 
@@ -736,9 +837,8 @@ Fields:
 - `created_at` — date-time string. Legacy vault creation timestamp.
 - `last_opened` — date-time string. Legacy last-opened timestamp.
 
-The `Meta` shared type still exists, and the demo-vault generator can create this file, but the
-current backend has no meta service or route and does not read or update `meta.yml`. Current vault
-identity metadata belongs in `.basalt/vault.json`.
+Older vaults can contain this file. The current apps do not read, write, or create `meta.yml`.
+Current vault identity metadata belongs in `.basalt/vault.json`.
 
 ## Referential integrity
 
@@ -751,6 +851,7 @@ budget.*.category_id    -> category.id
 category.parent_id      -> category.id or null
 migration account_map   -> account.id
 migration transaction_map -> transaction.id
+bank-sync row.account_id  -> account.id
 ```
 
 Basalt does not have a database constraint layer. Manual edits can therefore create dangling or
@@ -773,16 +874,17 @@ Guidelines:
 - `imports/` — created for future/optional import storage, but currently remains empty. Import
   jobs are held in memory and expire; raw documents and redacted pages are processed in memory
   and are never written to a vault.
-- Migration sessions, YNAB PATs, Monarch session material, and assisted-import installation IDs
-  are runtime secrets. They are never written to YAML, migration maps, vault metadata, or logs.
-  Mobile stores permitted transient secrets through its Keychain port; Electron keeps migration
-  session secrets in process memory.
-- Sync state and merge conflicts — held in memory; no sync index or conflict sidecar is stored in
-  the vault.
-- `.temp` — some mobile code configures this path, but current import code does not write to it.
+- Migration sessions, YNAB PATs, Monarch session material, Plaid access tokens, and
+  assisted-import installation IDs are runtime secrets. They are never written to YAML, source
+  maps, vault metadata, or logs. The apps keep them in the Keychain (Plaid tokens in the synced
+  iCloud Keychain) or, for Monarch, in memory only.
+- File sync — no sync index or conflict sidecar is stored in the vault. The sync service the user
+  picked (iCloud Drive, Syncthing, git, ...) moves the files.
+- `.<filename>.icloud` — iCloud Drive placeholder for a file that is not yet downloaded to the
+  device. Basalt downloads the file before it reads it.
 - `.DS_Store` — may be created by macOS. Basalt does not own it, and file watching ignores it.
-- `accounts-backup-<timestamp>/` — may be created by the maintenance script
-  `scripts/fix-account-balances.ts`; it is not part of the runtime vault format.
+- `accounts-backup-<timestamp>/` — older vaults may contain these folders from a former
+  maintenance script; they are not part of the vault format.
 
 ## Legacy and compatibility notes
 
@@ -792,8 +894,8 @@ Old account files used one `balance` field instead of `opening_balance` and `cur
 When an account has `balance` but no `opening_balance`, account loading migrates it in memory:
 
 - `opening_balance` and `current_balance` both receive the old value.
-- `opening_date` is set approximately ten years before migration so historical transactions are
-  included.
+- `opening_date` is set ten years before migration, as an ISO 8601 string, so historical
+  transactions are included.
 - A later account write serializes the migrated current fields.
 
 `balance` is not part of the current `Account` type. Some transitional vaults contain both
@@ -816,16 +918,19 @@ predates current metadata initialization; it does not invalidate the YAML entiti
 
 The new-vault YAML template and the current `defaultPreferences` object are not identical. Runtime
 reads merge current top-level defaults into the stored file. Documentation and migrations should
-use the shared `Preferences` type and `defaultPreferences` object as the current schema.
+use the `Preferences` type and the `defaultPreferences` object as the current schema.
 
 ## Maintaining this document
 
 Update this file whenever a change modifies:
 
-- an entity in `packages/shared/src/types/`
-- default categories, preferences, IDs, or vault initialization in `packages/shared/src/`
-- a path, serializer, or write rule in `packages/backend/src/services/`
-- Electron or mobile vault creation behavior
+- an entity in `packages/apple/BasaltKit/Sources/BasaltModels/Types/`
+- default categories, preferences, IDs, or vault initialization in
+  `packages/apple/BasaltKit/Sources/BasaltBackend/` (`Vault/`, `Shared/SharedUtils.swift`,
+  `Services/PreferencesService.swift`)
+- a path, serializer, or write rule in `packages/apple/BasaltKit/Sources/BasaltBackend/Services/`
+  or `Codec/`
+- iOS or macOS vault creation behavior (`packages/apple/AppCore/Stores/VaultStore.swift`)
 
 Verify examples against a real vault, but replace personal names, financial values where
 necessary, provider identifiers, and all credentials before committing documentation.
